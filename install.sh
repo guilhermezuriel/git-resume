@@ -83,6 +83,13 @@ print_info() {
     echo -e "${DIM}    $1${NC}"
 }
 
+print_section() {
+    local title="$1"
+    echo ""
+    echo -e "${BOLD}${title}${NC}"
+    echo -e "${DIM}$(printf "${H_LINE}%.0s" $(seq 1 ${#title}))${NC}"
+}
+
 # ============================================================================
 # SYSTEM DETECTION
 # ============================================================================
