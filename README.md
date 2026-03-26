@@ -19,7 +19,11 @@ A CLI tool that generates daily commit summaries from any Git repository. Suppor
 
 ## Installation
 
-### One-liner (recommended)
+### Brew version
+```
+  brew install guilhermezuriel/tap/git-resume
+```
+### Curl Version 
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/guilhermezuriel/git-resume/main/install.sh | bash
