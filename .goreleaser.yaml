@@ -21,9 +21,13 @@ brews:
   - name: git-resume
     homepage: "https://github.com/guilhermezuriel/git-resume"
     description: "CLI to summarize git commits using AI"
+    license: "MIT"
     repository:
       owner: guilhermezuriel
       name: homebrew-tap
+    commit_author:
+      name: "goreleaser"
+      email: "goreleaser@gitbub.com"
 
 checksum:
   name_template: "checksums.txt"
