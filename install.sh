@@ -13,8 +13,8 @@ set -e
 VERSION="2.0.0"
 INSTALL_DIR="/usr/local/bin"
 SCRIPT_NAME="git-resume"
-REPO_URL="https://github.com/YOUR_USERNAME/git-resume"  # Update this
-RAW_URL="https://raw.githubusercontent.com/YOUR_USERNAME/git-resume/main/git-resume"  # Update this
+REPO_URL="https://github.com/guilhermezuriel/git-resume"
+RAW_URL="https://raw.githubusercontent.com/guilhermezuriel/git-resume/main/git-resume"
 
 # For local installation (when script is bundled)
 BUNDLED_INSTALL=false

@@ -23,20 +23,20 @@ A CLI tool that generates daily commit summaries from any Git repository. Suppor
 ### One-liner (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/git-resume/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/guilhermezuriel/git-resume/main/install.sh | bash
 ```
 
 ### Manual
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/git-resume/main/git-resume \
+curl -fsSL https://raw.githubusercontent.com/guilhermezuriel/git-resume/main/git-resume \
   -o /usr/local/bin/git-resume && chmod +x /usr/local/bin/git-resume
 ```
 
 ### Clone & install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/git-resume
+git clone https://github.com/guilhermezuriel/git-resume
 cd git-resume
 bash install.sh
 ```
