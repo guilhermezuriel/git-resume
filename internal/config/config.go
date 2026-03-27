@@ -1,9 +1,14 @@
 package config
 
-// RunConfig holds all parameters for a single generation run.
+
 type RunConfig struct {
-	Date     string
-	Author   string
-	Enrich   bool
-	LangCode string
+	DateFrom    string
+	DateTo      string
+	Author      string
+	Enrich      bool
+	LangCode    string
+	AllBranches bool
+	Consolidate bool
+
+	Model string
 }
