@@ -1,6 +1,7 @@
 package screens
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	internalai "github.com/guilhermezuriel/git-resume/internal/ai"
 	"github.com/guilhermezuriel/git-resume/internal/claude"
 	"github.com/guilhermezuriel/git-resume/internal/config"
 	gitpkg "github.com/guilhermezuriel/git-resume/internal/git"
@@ -37,7 +39,9 @@ type genStep int
 const (
 	stepDate genStep = iota
 	stepAuthor
+	stepBranch
 	stepMode
+	stepModel // only visited when Enrich = true
 	stepLang
 	stepConfirm
 	stepProcessing
@@ -52,10 +56,13 @@ type GenerateFlow struct {
 	// Step options
 	dateOptions   []string
 	authorOptions []string
+	branchOptions []string
 	modeOptions   []string
+	modelOptions  []string // labels shown in the TUI
+	modelIDs      []string // parallel slice with the raw IDs passed to NewModel
 	langOptions   []string
 
-	// Cursors per step
+	// Cursors per step (indices match step iota values 0-5).
 	cursors [6]int
 
 	// Custom input fields
@@ -110,12 +117,27 @@ func NewGenerateFlow(repoInfo *gitpkg.RepoInfo) GenerateFlow {
 		authorLabel = fmt.Sprintf("My commits only (%s)", gitName)
 	}
 
+	// Build model list: Claude CLI models first (no API key needed), then OpenAI API models.
+	var modelLabels []string
+	var modelIDs []string
+	for _, m := range claude.ListCLIModels() {
+		modelLabels = append(modelLabels, m.Label)
+		modelIDs = append(modelIDs, m.ID)
+	}
+	for _, m := range internalai.ListModels() {
+		modelLabels = append(modelLabels, m.Label)
+		modelIDs = append(modelIDs, m.ID)
+	}
+
 	return GenerateFlow{
 		repoInfo:          repoInfo,
 		step:              stepDate,
 		dateOptions:       []string{fmt.Sprintf("Today (%s)", today), fmt.Sprintf("Yesterday (%s)", yesterday), "Custom date"},
 		authorOptions:     []string{"All commits", authorLabel, "Specific author"},
-		modeOptions:       []string{"Simple (fast)", "AI-enriched (requires Claude CLI)"},
+		branchOptions:     []string{"Current branch only", "All branches"},
+		modeOptions:       []string{"Simple (fast)", "AI-enriched"},
+		modelOptions:      modelLabels,
+		modelIDs:          modelIDs,
 		langOptions:       []string{"pt (Portuguese)", "en (English)", "es (Spanish)", "fr (French)", "de (German)", "Other"},
 		customDateInput:   ti,
 		customAuthorInput: tai,
@@ -145,7 +167,6 @@ func (g GenerateFlow) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return g, nil
 
 	case tea.KeyMsg:
-		// Handle custom input modes first
 		if g.enteringCustomDate {
 			return g.handleCustomDateInput(msg)
 		}
@@ -163,12 +184,16 @@ func (g GenerateFlow) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if g.step > stepDate && g.step < stepProcessing {
 				g.step--
+				// Skip stepModel when going back from stepLang if mode is simple.
+				if g.step == stepModel && !g.cfg.Enrich {
+					g.step--
+				}
 				return g, nil
 			}
 
 		case "up", "k":
 			if g.step < stepConfirm {
-				idx := int(g.step)
+				idx := cursorIdx(g.step)
 				if g.cursors[idx] > 0 {
 					g.cursors[idx]--
 				}
@@ -176,7 +201,7 @@ func (g GenerateFlow) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "down", "j":
 			if g.step < stepConfirm {
-				idx := int(g.step)
+				idx := cursorIdx(g.step)
 				opts := g.optionsForStep(g.step)
 				if g.cursors[idx] < len(opts)-1 {
 					g.cursors[idx]++
@@ -193,7 +218,6 @@ func (g GenerateFlow) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Pass input updates to active text inputs
 	if g.enteringCustomDate {
 		var cmd tea.Cmd
 		g.customDateInput, cmd = g.customDateInput.Update(msg)
@@ -216,63 +240,72 @@ func (g GenerateFlow) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (g GenerateFlow) handleEnter() (tea.Model, tea.Cmd) {
 	switch g.step {
 	case stepDate:
-		cur := g.cursors[0]
+		cur := g.cursors[cursorIdx(stepDate)]
 		switch cur {
 		case 0:
-			g.cfg.Date = time.Now().Format("2006-01-02")
+			d := time.Now().Format("2006-01-02")
+			g.cfg.DateFrom = d
+			g.cfg.DateTo = d
 			g.step = stepAuthor
 		case 1:
-			g.cfg.Date = time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+			d := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+			g.cfg.DateFrom = d
+			g.cfg.DateTo = d
 			g.step = stepAuthor
 		case 2:
 			g.enteringCustomDate = true
 			g.customDateInput.SetValue("")
-			cmd := g.customDateInput.Focus()
-			return g, cmd
+			return g, g.customDateInput.Focus()
 		}
 
 	case stepAuthor:
-		cur := g.cursors[1]
+		cur := g.cursors[cursorIdx(stepAuthor)]
 		switch cur {
 		case 0:
 			g.cfg.Author = ""
-			g.step = stepMode
+			g.step = stepBranch
 		case 1:
 			name, _ := gitpkg.GetHostAuthor()
 			g.cfg.Author = name
-			g.step = stepMode
+			g.step = stepBranch
 		case 2:
 			g.enteringCustomAuthor = true
 			g.customAuthorInput.SetValue("")
-			cmd := g.customAuthorInput.Focus()
-			return g, cmd
+			return g, g.customAuthorInput.Focus()
 		}
 
+	case stepBranch:
+		cur := g.cursors[cursorIdx(stepBranch)]
+		g.cfg.AllBranches = cur == 1
+		g.step = stepMode
+
 	case stepMode:
-		cur := g.cursors[2]
+		cur := g.cursors[cursorIdx(stepMode)]
 		if cur == 0 {
 			g.cfg.Enrich = false
+			g.cfg.Model = ""
 			g.step = stepConfirm
 		} else {
 			g.cfg.Enrich = true
-			g.step = stepLang
+			g.step = stepModel
 		}
 
+	case stepModel:
+		cur := g.cursors[cursorIdx(stepModel)]
+		g.cfg.Model = g.modelIDs[cur]
+		g.step = stepLang
+
 	case stepLang:
-		cur := g.cursors[3]
+		cur := g.cursors[cursorIdx(stepLang)]
 		if cur == len(g.langOptions)-1 {
-			// "Other"
 			g.enteringCustomLang = true
 			g.customLangInput.SetValue("")
-			cmd := g.customLangInput.Focus()
-			return g, cmd
+			return g, g.customLangInput.Focus()
 		}
-		// Extract code from "xx (Language)" format
 		g.cfg.LangCode = strings.SplitN(g.langOptions[cur], " ", 2)[0]
 		g.step = stepConfirm
 
 	case stepConfirm:
-		// Start generation
 		g.step = stepProcessing
 		cfg := g.cfg
 		info := g.repoInfo
@@ -292,11 +325,11 @@ func (g GenerateFlow) handleCustomDateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	switch msg.String() {
 	case "enter":
 		val := strings.TrimSpace(g.customDateInput.Value())
-		if val != "" {
-			g.cfg.Date = val
-		} else {
-			g.cfg.Date = time.Now().Format("2006-01-02")
+		if val == "" {
+			val = time.Now().Format("2006-01-02")
 		}
+		g.cfg.DateFrom = val
+		g.cfg.DateTo = val
 		g.enteringCustomDate = false
 		g.customDateInput.Blur()
 		g.step = stepAuthor
@@ -317,7 +350,7 @@ func (g GenerateFlow) handleCustomAuthorInput(msg tea.KeyMsg) (tea.Model, tea.Cm
 		g.cfg.Author = strings.TrimSpace(g.customAuthorInput.Value())
 		g.enteringCustomAuthor = false
 		g.customAuthorInput.Blur()
-		g.step = stepMode
+		g.step = stepBranch
 		return g, nil
 	case "esc":
 		g.enteringCustomAuthor = false
@@ -347,14 +380,24 @@ func (g GenerateFlow) handleCustomLangInput(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	return g, cmd
 }
 
+// cursorIdx maps a step to its slot in the cursors array.
+// stepModel sits at index 3; stepLang shifts to 4.
+func cursorIdx(s genStep) int {
+	return int(s) // iota values already match 0-4 for Date..Lang
+}
+
 func (g GenerateFlow) optionsForStep(s genStep) []string {
 	switch s {
 	case stepDate:
 		return g.dateOptions
 	case stepAuthor:
 		return g.authorOptions
+	case stepBranch:
+		return g.branchOptions
 	case stepMode:
 		return g.modeOptions
+	case stepModel:
+		return g.modelOptions
 	case stepLang:
 		return g.langOptions
 	}
@@ -369,7 +412,7 @@ func (g GenerateFlow) View() string {
 
 	switch g.step {
 	case stepDate:
-		sb.WriteString(renderStepProgress(stepDate) + "\n")
+		sb.WriteString(renderStepProgress(g.cfg.Enrich, stepDate) + "\n")
 		sb.WriteString(genSectionStyle.Render("  Select Date") + "\n\n")
 		if g.enteringCustomDate {
 			sb.WriteString(genDimStyle.Render("  Date: "))
@@ -377,12 +420,12 @@ func (g GenerateFlow) View() string {
 			sb.WriteString("\n\n")
 			sb.WriteString(genDimStyle.Render("  enter confirm  ·  esc cancel"))
 		} else {
-			sb.WriteString(renderOptions(g.dateOptions, g.cursors[0]))
+			sb.WriteString(renderOptions(g.dateOptions, g.cursors[cursorIdx(stepDate)]))
 			sb.WriteString(genDimStyle.Render("\n  ↑↓ move  ·  enter select  ·  esc back"))
 		}
 
 	case stepAuthor:
-		sb.WriteString(renderStepProgress(stepAuthor) + "\n")
+		sb.WriteString(renderStepProgress(g.cfg.Enrich, stepAuthor) + "\n")
 		sb.WriteString(genSectionStyle.Render("  Author Filter") + "\n\n")
 		if g.enteringCustomAuthor {
 			sb.WriteString(genDimStyle.Render("  Author: "))
@@ -390,18 +433,30 @@ func (g GenerateFlow) View() string {
 			sb.WriteString("\n\n")
 			sb.WriteString(genDimStyle.Render("  enter confirm  ·  esc cancel"))
 		} else {
-			sb.WriteString(renderOptions(g.authorOptions, g.cursors[1]))
+			sb.WriteString(renderOptions(g.authorOptions, g.cursors[cursorIdx(stepAuthor)]))
 			sb.WriteString(genDimStyle.Render("\n  ↑↓ move  ·  enter select  ·  esc back"))
 		}
 
+	case stepBranch:
+		sb.WriteString(renderStepProgress(g.cfg.Enrich, stepBranch) + "\n")
+		sb.WriteString(genSectionStyle.Render("  Branch Scope") + "\n\n")
+		sb.WriteString(renderOptions(g.branchOptions, g.cursors[cursorIdx(stepBranch)]))
+		sb.WriteString(genDimStyle.Render("\n  ↑↓ move  ·  enter select  ·  esc back"))
+
 	case stepMode:
-		sb.WriteString(renderStepProgress(stepMode) + "\n")
+		sb.WriteString(renderStepProgress(g.cfg.Enrich, stepMode) + "\n")
 		sb.WriteString(genSectionStyle.Render("  Summary Mode") + "\n\n")
-		sb.WriteString(renderOptions(g.modeOptions, g.cursors[2]))
+		sb.WriteString(renderOptions(g.modeOptions, g.cursors[cursorIdx(stepMode)]))
+		sb.WriteString(genDimStyle.Render("\n  ↑↓ move  ·  enter select  ·  esc back"))
+
+	case stepModel:
+		sb.WriteString(renderStepProgress(g.cfg.Enrich, stepModel) + "\n")
+		sb.WriteString(genSectionStyle.Render("  Select Model") + "\n\n")
+		sb.WriteString(renderOptions(g.modelOptions, g.cursors[cursorIdx(stepModel)]))
 		sb.WriteString(genDimStyle.Render("\n  ↑↓ move  ·  enter select  ·  esc back"))
 
 	case stepLang:
-		sb.WriteString(renderStepProgress(stepLang) + "\n")
+		sb.WriteString(renderStepProgress(g.cfg.Enrich, stepLang) + "\n")
 		sb.WriteString(genSectionStyle.Render("  Output Language") + "\n\n")
 		if g.enteringCustomLang {
 			sb.WriteString(genDimStyle.Render("  Language code: "))
@@ -409,7 +464,7 @@ func (g GenerateFlow) View() string {
 			sb.WriteString("\n\n")
 			sb.WriteString(genDimStyle.Render("  enter confirm  ·  esc cancel"))
 		} else {
-			sb.WriteString(renderOptions(g.langOptions, g.cursors[3]))
+			sb.WriteString(renderOptions(g.langOptions, g.cursors[cursorIdx(stepLang)]))
 			sb.WriteString(genDimStyle.Render("\n  ↑↓ move  ·  enter select  ·  esc back"))
 		}
 
@@ -418,16 +473,29 @@ func (g GenerateFlow) View() string {
 
 		modeLabel := "Simple"
 		if g.cfg.Enrich {
-			modeLabel = "AI-enriched (Claude)"
+			modelLabel := g.cfg.Model
+			for i, id := range g.modelIDs {
+				if id == g.cfg.Model {
+					modelLabel = g.modelOptions[i]
+					break
+				}
+			}
+			modeLabel = "AI-enriched · " + modelLabel
 		}
 		authorLabel := "All commits"
 		if g.cfg.Author != "" {
 			authorLabel = g.cfg.Author
 		}
 
+		branchScopeLabel := "Current branch"
+		if g.cfg.AllBranches {
+			branchScopeLabel = "All branches"
+		}
+
 		sb.WriteString(genDimStyle.Render("  " + strings.Repeat("─", 32)) + "\n")
-		sb.WriteString(fmt.Sprintf("  %-10s %s\n", genLabelStyle.Render("Date"), genValueStyle.Render(g.cfg.Date)))
+		sb.WriteString(fmt.Sprintf("  %-10s %s\n", genLabelStyle.Render("Date"), genValueStyle.Render(g.cfg.DateFrom)))
 		sb.WriteString(fmt.Sprintf("  %-10s %s\n", genLabelStyle.Render("Author"), genValueStyle.Render(authorLabel)))
+		sb.WriteString(fmt.Sprintf("  %-10s %s\n", genLabelStyle.Render("Branches"), genValueStyle.Render(branchScopeLabel)))
 		sb.WriteString(fmt.Sprintf("  %-10s %s\n", genLabelStyle.Render("Mode"), genValueStyle.Render(modeLabel)))
 		if g.cfg.Enrich && g.cfg.LangCode != "" {
 			sb.WriteString(fmt.Sprintf("  %-10s %s\n", genLabelStyle.Render("Language"), genValueStyle.Render(g.cfg.LangCode)))
@@ -457,20 +525,36 @@ func (g GenerateFlow) View() string {
 	return sb.String()
 }
 
-// renderStepProgress renders a minimal 1 ─ 2 ─ 3 ─ 4 progress indicator.
-func renderStepProgress(current genStep) string {
-	steps := []genStep{stepDate, stepAuthor, stepMode, stepLang}
-	labels := []string{"Date", "Author", "Mode", "Lang"}
+// renderStepProgress renders a progress bar that adapts to the current flow.
+// When enriched is true the bar shows Model; otherwise it omits it.
+func renderStepProgress(enriched bool, current genStep) string {
+	type stepLabel struct {
+		s genStep
+		l string
+	}
+	all := []stepLabel{
+		{stepDate, "Date"},
+		{stepAuthor, "Author"},
+		{stepBranch, "Branch"},
+		{stepMode, "Mode"},
+		{stepModel, "Model"},
+		{stepLang, "Lang"},
+	}
+
 	var parts []string
-	for i, s := range steps {
+	for _, sl := range all {
+		// Hide the Model step from the bar when in Simple mode.
+		if sl.s == stepModel && !enriched && current != stepModel {
+			continue
+		}
 		var label string
 		switch {
-		case s < current:
-			label = genDoneStep.Render(labels[i])
-		case s == current:
-			label = genActiveStep.Render(labels[i])
+		case sl.s < current:
+			label = genDoneStep.Render(sl.l)
+		case sl.s == current:
+			label = genActiveStep.Render(sl.l)
 		default:
-			label = genFutureStep.Render(labels[i])
+			label = genFutureStep.Render(sl.l)
 		}
 		parts = append(parts, label)
 	}
@@ -496,63 +580,193 @@ func renderOptions(opts []string, cursor int) string {
 // runGeneration is the async tea.Cmd that performs the actual work.
 func runGeneration(cfg config.RunConfig, info *gitpkg.RepoInfo) tea.Cmd {
 	return func() tea.Msg {
-		commits, err := gitpkg.GetCommits(cfg.Date, cfg.Author)
+		from, err := time.Parse("2006-01-02", cfg.DateFrom)
 		if err != nil {
-			return GenerationDoneMsg{Err: err}
+			return GenerationDoneMsg{Err: fmt.Errorf("invalid date: %w", err)}
 		}
+		to, err := time.Parse("2006-01-02", cfg.DateTo)
+		if err != nil {
+			return GenerationDoneMsg{Err: fmt.Errorf("invalid date: %w", err)}
+		}
+
+		dr := gitpkg.DateRange{From: from, To: to}
 
 		repoDir, err := storage.InitRepo(info.ID, info.Name, info.Path, info.Remote)
 		if err != nil {
 			return GenerationDoneMsg{Err: err}
 		}
 
+		period := cfg.DateFrom
+		if cfg.DateFrom != cfg.DateTo {
+			period = cfg.DateFrom + " to " + cfg.DateTo
+		}
+
 		var content string
-		if cfg.Enrich {
-			if !claude.CheckClaude() {
-				return GenerationDoneMsg{Err: fmt.Errorf("claude CLI not found — install with: npm install -g @anthropic-ai/claude-code")}
+
+		if cfg.AllBranches {
+			_ = gitpkg.FetchAll() // best effort; ignore fetch errors
+			branchCommits, err := gitpkg.GetCommitsAllBranches(dr, cfg.Author)
+			if err != nil {
+				return GenerationDoneMsg{Err: err}
 			}
-			if len(commits) == 0 {
+			if !cfg.Enrich {
+				content = report.GenerateMultiBranch(branchCommits, info.Name, period, cfg.Author)
+			} else {
+				content = tuiEnrichAllBranchesPerBranch(cfg, branchCommits, info.Name, period)
+			}
+		} else {
+			commits, err := gitpkg.GetCommitsRange(dr, cfg.Author)
+			if err != nil {
+				return GenerationDoneMsg{Err: err}
+			}
+			if !cfg.Enrich {
+				content = report.GenerateSimple(commits, info.Name, period, cfg.Author)
+			} else if len(commits) == 0 {
 				meta := report.EnrichedMeta{
 					ClaudeResponse: "No activity recorded for this date.",
 					LangCode:       cfg.LangCode,
+					ModelID:        cfg.Model,
 				}
-				content = report.GenerateEnriched(meta, info.Name, cfg.Date, cfg.Author)
+				content = report.GenerateEnriched(meta, info.Name, period, cfg.Author)
+			} else if claude.IsCLIModel(cfg.Model) {
+				content = tuiEnrichWithClaude(cfg, commits, info.Name, period)
 			} else {
-				var msgs []string
-				for _, c := range commits {
-					msgs = append(msgs, c.Message)
+				var genErr error
+				content, genErr = tuiEnrichWithAPI(cfg, commits, info.Name, period)
+				if genErr != nil {
+					return GenerationDoneMsg{Err: genErr}
 				}
-				prompt := claude.BuildPrompt(msgs, cfg.LangCode)
-				inputTokens := claude.EstimateTokens(prompt)
-
-				start := time.Now()
-				resp, err := claude.RunClaude(prompt)
-				elapsed := int(time.Since(start).Seconds())
-				if err != nil {
-					return GenerationDoneMsg{Err: err}
-				}
-				outputTokens := claude.EstimateTokens(resp)
-
-				meta := report.EnrichedMeta{
-					ClaudeResponse: resp,
-					LangCode:       cfg.LangCode,
-					CommitCount:    len(commits),
-					ProcessingTime: elapsed,
-					InputTokens:    inputTokens,
-					OutputTokens:   outputTokens,
-				}
-				content = report.GenerateEnriched(meta, info.Name, cfg.Date, cfg.Author)
 			}
-		} else {
-			content = report.GenerateSimple(commits, info.Name, cfg.Date, cfg.Author)
 		}
 
-		path, err := storage.WriteReport(repoDir, cfg.Date, cfg.Author, cfg.Enrich, content)
+		path, err := storage.WriteReport(repoDir, cfg.DateFrom, cfg.Author, cfg.Enrich, content)
 		if err != nil {
 			return GenerationDoneMsg{Err: err}
 		}
 		return GenerationDoneMsg{Content: content, Path: path}
 	}
+}
+
+func tuiEnrichWithClaude(cfg config.RunConfig, commits []gitpkg.Commit, repoName, period string) string {
+	if !claude.CheckClaude() {
+		return report.GenerateSimple(commits, repoName, period, cfg.Author)
+	}
+	var msgs []string
+	for _, c := range commits {
+		msgs = append(msgs, c.Message)
+	}
+	prompt := claude.BuildPrompt(msgs, cfg.LangCode)
+	start := time.Now()
+	resp, err := claude.RunClaude(prompt, cfg.Model)
+	elapsed := int(time.Since(start).Seconds())
+	if err != nil {
+		return report.GenerateSimple(commits, repoName, period, cfg.Author)
+	}
+	meta := report.EnrichedMeta{
+		ClaudeResponse: resp,
+		LangCode:       cfg.LangCode,
+		CommitCount:    len(commits),
+		ProcessingTime: elapsed,
+		InputTokens:    claude.EstimateTokens(prompt),
+		OutputTokens:   claude.EstimateTokens(resp),
+		ModelID:        cfg.Model,
+	}
+	return report.GenerateEnriched(meta, repoName, period, cfg.Author)
+}
+
+func tuiEnrichWithAPI(cfg config.RunConfig, commits []gitpkg.Commit, repoName, period string) (string, error) {
+	model, err := internalai.NewModel(cfg.Model)
+	if err != nil {
+		return "", err
+	}
+	var msgs []string
+	for _, c := range commits {
+		msgs = append(msgs, c.Message)
+	}
+	prompt := claude.BuildPrompt(msgs, cfg.LangCode)
+	messages := []internalai.Message{{Role: "user", Content: prompt}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	result, err := internalai.ChatStream(ctx, model, messages, nil)
+	elapsed := int(time.Since(start).Seconds())
+	if err != nil {
+		return "", err
+	}
+	meta := report.EnrichedMeta{
+		ClaudeResponse: result.FullText,
+		LangCode:       cfg.LangCode,
+		CommitCount:    len(commits),
+		ProcessingTime: elapsed,
+		InputTokens:    result.InputTokens,
+		OutputTokens:   result.OutputTokens,
+		ModelID:        cfg.Model,
+	}
+	return report.GenerateEnriched(meta, repoName, period, cfg.Author), nil
+}
+
+func tuiEnrichAllBranchesPerBranch(cfg config.RunConfig, branchCommits []gitpkg.BranchCommits, repoName, period string) string {
+	var results []report.EnrichedBranchResult
+
+	for _, bc := range branchCommits {
+		var msgs []string
+		for _, c := range bc.Commits {
+			msgs = append(msgs, c.Message)
+		}
+		prompt := claude.BuildPrompt(msgs, cfg.LangCode)
+
+		var aiResp string
+		var inputTokens, outputTokens, elapsed int
+
+		if claude.IsCLIModel(cfg.Model) {
+			if !claude.CheckClaude() {
+				aiResp = "(Claude CLI not available)"
+			} else {
+				start := time.Now()
+				resp, err := claude.RunClaude(prompt, cfg.Model)
+				elapsed = int(time.Since(start).Seconds())
+				if err != nil {
+					aiResp = fmt.Sprintf("(error: %v)", err)
+				} else {
+					aiResp = resp
+					inputTokens = claude.EstimateTokens(prompt)
+					outputTokens = claude.EstimateTokens(resp)
+				}
+			}
+		} else {
+			model, err := internalai.NewModel(cfg.Model)
+			if err != nil {
+				aiResp = fmt.Sprintf("(model init error: %v)", err)
+			} else {
+				messages := []internalai.Message{{Role: "user", Content: prompt}}
+				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				start := time.Now()
+				result, err := internalai.ChatStream(ctx, model, messages, nil)
+				elapsed = int(time.Since(start).Seconds())
+				cancel()
+				if err != nil {
+					aiResp = fmt.Sprintf("(api error: %v)", err)
+				} else {
+					aiResp = result.FullText
+					inputTokens = result.InputTokens
+					outputTokens = result.OutputTokens
+				}
+			}
+		}
+
+		results = append(results, report.EnrichedBranchResult{
+			BranchName:     bc.Branch,
+			AIResponse:     aiResp,
+			CommitCount:    len(bc.Commits),
+			ProcessingTime: elapsed,
+			InputTokens:    inputTokens,
+			OutputTokens:   outputTokens,
+		})
+	}
+
+	return report.GenerateEnrichedMultiBranch(results, cfg.Model, repoName, period, cfg.Author, cfg.LangCode)
 }
 
 // GenerationDoneMsg is sent when the generation goroutine completes.
