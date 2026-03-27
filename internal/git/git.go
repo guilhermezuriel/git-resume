@@ -9,15 +9,16 @@ import (
 	"time"
 )
 
-// Commit represents a single git commit entry.
+
 type Commit struct {
-	Hash    string
-	Message string
-	Author  string
-	Date    string
+	FullHash string
+	Hash     string
+	Message  string
+	Author   string
+	Date     string
 }
 
-// RepoInfo holds basic repository metadata.
+
 type RepoInfo struct {
 	Name   string
 	Path   string
@@ -25,7 +26,29 @@ type RepoInfo struct {
 	ID     string
 }
 
-// GetRepoRoot returns the root directory of the current git repo.
+
+type DateRange struct {
+	From time.Time
+	To   time.Time
+}
+
+
+func (dr DateRange) Label() string {
+	from := dr.From.Format("2006-01-02")
+	to := dr.To.Format("2006-01-02")
+	if from == to {
+		return from
+	}
+	return from + " to " + to
+}
+
+
+type BranchCommits struct {
+	Branch  string
+	Commits []Commit
+}
+
+
 func GetRepoRoot() (string, error) {
 	out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output()
 	if err != nil {
@@ -34,13 +57,13 @@ func GetRepoRoot() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// IsGitRepo returns true if the current directory is inside a git repository.
+
 func IsGitRepo() bool {
 	err := exec.Command("git", "rev-parse", "--is-inside-work-tree").Run()
 	return err == nil
 }
 
-// GetRepoInfo returns metadata for the current git repository.
+
 func GetRepoInfo() (*RepoInfo, error) {
 	root, err := GetRepoRoot()
 	if err != nil {
@@ -64,7 +87,7 @@ func GetRepoInfo() (*RepoInfo, error) {
 	}, nil
 }
 
-// GetHostAuthor returns the configured git user name or email.
+
 func GetHostAuthor() (string, error) {
 	name := ""
 	email := ""
@@ -85,8 +108,7 @@ func GetHostAuthor() (string, error) {
 	return email, nil
 }
 
-// GetCommits returns commits for the given date and optional author filter.
-// date must be in YYYY-MM-DD format.
+
 func GetCommits(date, author string) ([]Commit, error) {
 	parsed, err := time.Parse("2006-01-02", date)
 	if err != nil {
@@ -98,8 +120,9 @@ func GetCommits(date, author string) ([]Commit, error) {
 		"log",
 		fmt.Sprintf("--after=%s 00:00:00", date),
 		fmt.Sprintf("--before=%s 00:00:00", nextDate),
-		"--pretty=format:%h|%s|%an|%ad",
+		"--pretty=format:%H|%h|%s|%an|%ad",
 		"--date=short",
+		"--no-merges",
 	}
 
 	if author != "" {
@@ -108,13 +131,135 @@ func GetCommits(date, author string) ([]Commit, error) {
 
 	out, err := exec.Command("git", args...).Output()
 	if err != nil {
-		// git log exits 128 if not in repo; exit 0 for empty
 		return nil, nil
+	}
+
+	return parseCommitLines(string(out)), nil
+}
+
+
+func GetCommitsRange(dr DateRange, author string) ([]Commit, error) {
+	afterDate := dr.From.AddDate(0, 0, -1).Format("2006-01-02")
+	beforeDate := dr.To.Format("2006-01-02")
+
+	args := []string{
+		"log",
+		"HEAD",
+		fmt.Sprintf("--after=%s", afterDate),
+		fmt.Sprintf("--before=%s 23:59:59", beforeDate),
+		"--pretty=format:%H|%h|%s|%an|%ad",
+		"--date=short",
+		"--no-merges",
+	}
+
+	if author != "" {
+		args = append(args, fmt.Sprintf("--author=%s", author))
+	}
+
+	out, err := exec.Command("git", args...).Output()
+	if err != nil {
+		return nil, nil
+	}
+
+	return parseCommitLines(string(out)), nil
+}
+
+
+func FetchAll() error {
+	return exec.Command("git", "fetch", "--all", "--quiet").Run()
+}
+
+
+func GetAllBranches() ([]string, error) {
+	out, err := exec.Command("git", "branch", "-a", "--format=%(refname:short)").Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list branches: %w", err)
 	}
 
 	raw := strings.TrimSpace(string(out))
 	if raw == "" {
 		return nil, nil
+	}
+
+	var branches []string
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.Contains(line, "HEAD") {
+			continue
+		}
+		branches = append(branches, line)
+	}
+	return branches, nil
+}
+
+
+func GetCommitsForBranch(branch string, dr DateRange, author string) ([]Commit, error) {
+	afterDate := dr.From.AddDate(0, 0, -1).Format("2006-01-02")
+	beforeDate := dr.To.Format("2006-01-02")
+
+	args := []string{
+		"log",
+		branch,
+		fmt.Sprintf("--after=%s", afterDate),
+		fmt.Sprintf("--before=%s 23:59:59", beforeDate),
+		"--pretty=format:%H|%h|%s|%an|%ad",
+		"--date=short",
+		"--no-merges",
+	}
+
+	if author != "" {
+		args = append(args, fmt.Sprintf("--author=%s", author))
+	}
+
+	out, err := exec.Command("git", args...).Output()
+	if err != nil {
+		return nil, nil
+	}
+
+	return parseCommitLines(string(out)), nil
+}
+
+// GetCommitsAllBranches fetches commits from all branches, deduplicating by full hash.
+func GetCommitsAllBranches(dr DateRange, author string) ([]BranchCommits, error) {
+	branches, err := GetAllBranches()
+	if err != nil {
+		return nil, err
+	}
+
+	seen := make(map[string]bool)
+	var result []BranchCommits
+
+	for _, branch := range branches {
+		commits, err := GetCommitsForBranch(branch, dr, author)
+		if err != nil {
+			continue
+		}
+		unique := deduplicateByHash(commits, seen)
+		if len(unique) > 0 {
+			result = append(result, BranchCommits{Branch: branch, Commits: unique})
+		}
+	}
+
+	return result, nil
+}
+
+
+func deduplicateByHash(commits []Commit, seen map[string]bool) []Commit {
+	var result []Commit
+	for _, c := range commits {
+		if !seen[c.FullHash] {
+			seen[c.FullHash] = true
+			result = append(result, c)
+		}
+	}
+	return result
+}
+
+
+func parseCommitLines(raw string) []Commit {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
 	}
 
 	var commits []Commit
@@ -123,18 +268,19 @@ func GetCommits(date, author string) ([]Commit, error) {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "|", 4)
-		if len(parts) < 4 {
+		parts := strings.SplitN(line, "|", 5)
+		if len(parts) < 5 {
 			continue
 		}
 		commits = append(commits, Commit{
-			Hash:    parts[0],
-			Message: parts[1],
-			Author:  parts[2],
-			Date:    parts[3],
+			FullHash: parts[0],
+			Hash:     parts[1],
+			Message:  parts[2],
+			Author:   parts[3],
+			Date:     parts[4],
 		})
 	}
-	return commits, nil
+	return commits
 }
 
 // makeRepoID creates a unique, filesystem-safe identifier from remote URL or path.
