@@ -9,28 +9,20 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/guilhermezuriel/git-resume/internal/tui/components"
 )
 
-var (
-	viewerStatusStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	viewerCopiedStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
-	viewerCopyErrStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
-	viewerBorderStyle  = lipgloss.NewStyle().
-				Border(lipgloss.NormalBorder(), false, false, false, false).
-				BorderForeground(lipgloss.Color("240"))
-)
-
-// SummaryViewer shows the content of a single resume file.
+// SummaryViewer shows the content of a single resume file (full-screen).
 type SummaryViewer struct {
 	repoName string
 	filename string
 	path     string
-	content  string // raw text kept for clipboard copy
+	content  string
 	viewport viewport.Model
+	width    int
+	height   int
 	ready    bool
-	copyMsg  string // non-empty while feedback is shown ("Copied!" or error)
-	copyOK   bool   // true = success, false = error
+	copyMsg  string
+	copyOK   bool
 }
 
 func NewSummaryViewer(repoName, path string) SummaryViewer {
@@ -51,7 +43,16 @@ func (v SummaryViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case FileLoadedMsg:
 		v.content = msg.Content
-		v.viewport = viewport.New(80, 24)
+		vw := v.width
+		if vw == 0 {
+			vw = 80
+		}
+		vh := v.height
+		if vh == 0 {
+			vh = 24
+		}
+		v.viewport = viewport.New(vw-4, vh-8)
+		v.viewport.MouseWheelEnabled = true
 		v.viewport.SetContent(msg.Content)
 		v.ready = true
 		return v, nil
@@ -67,16 +68,23 @@ func (v SummaryViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, nil
 
 	case tea.WindowSizeMsg:
+		v.width = msg.Width
+		v.height = msg.Height
 		if v.ready {
 			v.viewport.Width = msg.Width - 4
 			v.viewport.Height = msg.Height - 8
 		}
 		return v, nil
 
-	case tea.KeyMsg:
-		// Any keypress clears the copy feedback.
-		v.copyMsg = ""
+	case tea.MouseMsg:
+		if v.ready {
+			var cmd tea.Cmd
+			v.viewport, cmd = v.viewport.Update(msg)
+			return v, cmd
+		}
 
+	case tea.KeyMsg:
+		v.copyMsg = ""
 		switch msg.String() {
 		case "q", "esc":
 			return v, func() tea.Msg { return NavigateMsg{To: ScreenSummaries} }
@@ -87,7 +95,6 @@ func (v SummaryViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return v, copyToClipboard(v.content)
 			}
 		}
-
 		if v.ready {
 			var cmd tea.Cmd
 			v.viewport, cmd = v.viewport.Update(msg)
@@ -98,45 +105,70 @@ func (v SummaryViewer) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (v SummaryViewer) View() string {
-	var sb strings.Builder
-	sb.WriteString("\n")
-	sb.WriteString(components.Header("git-resume v3.0.0", v.repoName))
-	sb.WriteString("\n\n")
+	primary := lipgloss.AdaptiveColor{Light: "#7C3AED", Dark: "#A78BFA"}
+	colorSuccess := lipgloss.AdaptiveColor{Light: "#10B981", Dark: "#34D399"}
+	colorError := lipgloss.AdaptiveColor{Light: "#EF4444", Dark: "#F87171"}
+	border := lipgloss.AdaptiveColor{Light: "#E2E8F0", Dark: "#45475A"}
+	textMuted := lipgloss.AdaptiveColor{Light: "#94A3B8", Dark: "#6C7086"}
+	textSecondary := lipgloss.AdaptiveColor{Light: "#64748B", Dark: "#A6ADC8"}
+
+	// Header bar
+	logoStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(primary).
+		Padding(0, 2)
+
+	repoStyle := lipgloss.NewStyle().Foreground(textSecondary)
+	header := lipgloss.JoinHorizontal(lipgloss.Center,
+		logoStyle.Render(" git-resume "),
+		repoStyle.Render("  · "+v.repoName),
+	)
 
 	if !v.ready {
-		sb.WriteString(viewerStatusStyle.Render("  Loading..."))
-		return sb.String()
+		loadStyle := lipgloss.NewStyle().Foreground(textSecondary)
+		return header + "\n\n" + loadStyle.Render("  Loading…") + "\n"
 	}
 
-	sb.WriteString(viewerBorderStyle.Render(v.viewport.View()))
-	sb.WriteString("\n")
+	// Viewport in a card
+	cardStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(border).
+		Padding(0, 1)
+
+	viewportBlock := cardStyle.Render(v.viewport.View())
 
 	pct := int(v.viewport.ScrollPercent() * 100)
 
-	// Status bar: show copy feedback when present, otherwise show keybindings.
+	// Status / help bar
+	var statusBar string
 	if v.copyMsg != "" {
-		left := viewerStatusStyle.Render(fmt.Sprintf("  %s  ·  %d%%  ·  ", v.filename, pct))
+		left := lipgloss.NewStyle().Foreground(textMuted).
+			Render(fmt.Sprintf("  %s  ·  %d%%  ·  ", v.filename, pct))
 		var right string
 		if v.copyOK {
-			right = viewerCopiedStyle.Render("✓ " + v.copyMsg)
+			right = lipgloss.NewStyle().Foreground(colorSuccess).Bold(true).Render("✓ " + v.copyMsg)
 		} else {
-			right = viewerCopyErrStyle.Render("✗ " + v.copyMsg)
+			right = lipgloss.NewStyle().Foreground(colorError).Bold(true).Render("✗ " + v.copyMsg)
 		}
-		sb.WriteString(left + right)
+		statusBar = left + right
 	} else {
-		sb.WriteString(viewerStatusStyle.Render(
-			fmt.Sprintf("  %s  ·  %d%%  ·  ↑↓ scroll  ·  c copy  ·  esc back", v.filename, pct),
-		))
+		statusBar = lipgloss.NewStyle().Foreground(textMuted).Render(
+			fmt.Sprintf("  %s  ·  %d%%  ·  ↑↓/mouse scroll  ·  c copy  ·  esc back", v.filename, pct),
+		)
 	}
 
-	sb.WriteString("\n")
-	return sb.String()
+	return lipgloss.JoinVertical(lipgloss.Left,
+		header,
+		"",
+		viewportBlock,
+		statusBar,
+	)
 }
 
 // CopyDoneMsg is sent when the clipboard write completes.
 type CopyDoneMsg struct{ Err error }
 
-// copyToClipboard writes text to the system clipboard asynchronously.
 func copyToClipboard(text string) tea.Cmd {
 	return func() tea.Msg {
 		return CopyDoneMsg{Err: clipboard.WriteAll(text)}

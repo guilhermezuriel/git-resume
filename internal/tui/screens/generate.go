@@ -20,18 +20,26 @@ import (
 )
 
 var (
-	genCursorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
-	genSelectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
-	genNormalStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-	genDimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	genSuccessStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
-	genErrorStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
-	genLabelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	genValueStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-	genSectionStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
-	genActiveStep    = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
-	genDoneStep      = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	genFutureStep    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	// Adaptive palette for the generate wizard
+	genPrimary   = lipgloss.AdaptiveColor{Light: "#7C3AED", Dark: "#A78BFA"}
+	genSuccess   = lipgloss.AdaptiveColor{Light: "#10B981", Dark: "#34D399"}
+	genErrColor  = lipgloss.AdaptiveColor{Light: "#EF4444", Dark: "#F87171"}
+	genText      = lipgloss.AdaptiveColor{Light: "#1E293B", Dark: "#CDD6F4"}
+	genMuted     = lipgloss.AdaptiveColor{Light: "#94A3B8", Dark: "#6C7086"}
+	genSecondary = lipgloss.AdaptiveColor{Light: "#64748B", Dark: "#A6ADC8"}
+
+	genCursorStyle   = lipgloss.NewStyle().Foreground(genPrimary).Bold(true)
+	genSelectedStyle = lipgloss.NewStyle().Foreground(genPrimary).Bold(true)
+	genNormalStyle   = lipgloss.NewStyle().Foreground(genText)
+	genDimStyle      = lipgloss.NewStyle().Foreground(genMuted)
+	genSuccessStyle  = lipgloss.NewStyle().Foreground(genSuccess).Bold(true)
+	genErrorStyle    = lipgloss.NewStyle().Foreground(genErrColor).Bold(true)
+	genLabelStyle    = lipgloss.NewStyle().Foreground(genSecondary)
+	genValueStyle    = lipgloss.NewStyle().Foreground(genText)
+	genSectionStyle  = lipgloss.NewStyle().Foreground(genPrimary).Bold(true)
+	genActiveStep    = lipgloss.NewStyle().Foreground(genPrimary).Bold(true)
+	genDoneStep      = lipgloss.NewStyle().Foreground(genSuccess)
+	genFutureStep    = lipgloss.NewStyle().Foreground(genMuted)
 )
 
 type genStep int
@@ -110,7 +118,7 @@ func NewGenerateFlow(repoInfo *gitpkg.RepoInfo) GenerateFlow {
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	sp.Style = lipgloss.NewStyle().Foreground(genPrimary)
 
 	authorLabel := "My commits only"
 	if gitName != "" {
@@ -407,7 +415,7 @@ func (g GenerateFlow) optionsForStep(s genStep) []string {
 func (g GenerateFlow) View() string {
 	var sb strings.Builder
 	sb.WriteString("\n")
-	sb.WriteString(components.Header("git-resume v3.0.0", g.repoInfo.Name))
+	sb.WriteString(components.Header("git-resume", g.repoInfo.Name))
 	sb.WriteString("\n\n")
 
 	switch g.step {

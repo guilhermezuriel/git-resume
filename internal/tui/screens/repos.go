@@ -11,12 +11,18 @@ import (
 )
 
 var (
-	repoCursorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
-	repoSelectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
-	repoNormalStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-	repoDimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	repoInfoStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("4"))
-	repoBadgeStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	repoPrimary  = lipgloss.AdaptiveColor{Light: "#7C3AED", Dark: "#A78BFA"}
+	repoText     = lipgloss.AdaptiveColor{Light: "#1E293B", Dark: "#CDD6F4"}
+	repoMuted    = lipgloss.AdaptiveColor{Light: "#94A3B8", Dark: "#6C7086"}
+	repoSecond   = lipgloss.AdaptiveColor{Light: "#64748B", Dark: "#A6ADC8"}
+	repoSecColor = lipgloss.AdaptiveColor{Light: "#0EA5E9", Dark: "#38BDF8"}
+
+	repoCursorStyle   = lipgloss.NewStyle().Foreground(repoPrimary).Bold(true)
+	repoSelectedStyle = lipgloss.NewStyle().Foreground(repoPrimary).Bold(true)
+	repoNormalStyle   = lipgloss.NewStyle().Foreground(repoText)
+	repoDimStyle      = lipgloss.NewStyle().Foreground(repoMuted)
+	repoInfoStyle     = lipgloss.NewStyle().Foreground(repoSecond)
+	repoBadgeStyle    = lipgloss.NewStyle().Foreground(repoSecColor)
 )
 
 // RepoBrowser shows all repos in ~/.git-resumes.
@@ -63,7 +69,7 @@ func (r RepoBrowser) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (r RepoBrowser) View() string {
 	var sb strings.Builder
 	sb.WriteString("\n")
-	sb.WriteString(components.Header("git-resume v3.0.0", "All Repositories"))
+	sb.WriteString(components.Header("git-resume", "All Repositories"))
 	sb.WriteString("\n\n")
 
 	if len(r.repos) == 0 {

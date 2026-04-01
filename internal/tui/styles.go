@@ -2,67 +2,77 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
-// Color palette — terminal ANSI colors for wide compatibility.
+// Adaptive color palette — works in both dark and light terminals.
 var (
-	colorCyan   = lipgloss.Color("6")
-	colorDim    = lipgloss.Color("240")
-	colorGreen  = lipgloss.Color("2")
-	colorRed    = lipgloss.Color("1")
-	colorYellow = lipgloss.Color("3")
-	colorBlue   = lipgloss.Color("4")
-	colorWhite  = lipgloss.Color("15")
+	// Brand
+	Primary   = lipgloss.AdaptiveColor{Light: "#7C3AED", Dark: "#A78BFA"}
+	Secondary = lipgloss.AdaptiveColor{Light: "#0EA5E9", Dark: "#38BDF8"}
+	Accent    = lipgloss.AdaptiveColor{Light: "#10B981", Dark: "#34D399"}
+
+	// Surfaces
+	Border      = lipgloss.AdaptiveColor{Light: "#E2E8F0", Dark: "#45475A"}
+	BorderFocus = lipgloss.AdaptiveColor{Light: "#7C3AED", Dark: "#A78BFA"}
+
+	// Text
+	TextPrimary   = lipgloss.AdaptiveColor{Light: "#1E293B", Dark: "#CDD6F4"}
+	TextSecondary = lipgloss.AdaptiveColor{Light: "#64748B", Dark: "#A6ADC8"}
+	TextMuted     = lipgloss.AdaptiveColor{Light: "#94A3B8", Dark: "#6C7086"}
+
+	// Status
+	ColorSuccess = lipgloss.AdaptiveColor{Light: "#10B981", Dark: "#34D399"}
+	ColorWarning = lipgloss.AdaptiveColor{Light: "#F59E0B", Dark: "#FBBF24"}
+	ColorError   = lipgloss.AdaptiveColor{Light: "#EF4444", Dark: "#F87171"}
+	ColorInfo    = lipgloss.AdaptiveColor{Light: "#3B82F6", Dark: "#60A5FA"}
 )
 
+// Shared base styles.
 var (
-	// Header: rounded border in cyan, with horizontal padding.
-	headerStyle = lipgloss.NewStyle().
+	CardStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorCyan).
-			Padding(0, 2)
+			BorderForeground(Border).
+			Padding(0, 1)
 
-	headerTitleStyle = lipgloss.NewStyle().
-				Foreground(colorCyan).
-				Bold(true)
+	CardFocusedStyle = lipgloss.NewStyle().
+				Border(lipgloss.DoubleBorder()).
+				BorderForeground(BorderFocus).
+				Padding(0, 1)
 
-	// Status bar at the bottom.
-	statusStyle = lipgloss.NewStyle().
-			Foreground(colorDim)
+	TitleStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(Primary)
 
-	// Cursor indicator for list items.
-	cursorStyle = lipgloss.NewStyle().
-			Foreground(colorCyan).
+	SubtitleStyle = lipgloss.NewStyle().
+			Foreground(TextSecondary)
+
+	MutedStyle = lipgloss.NewStyle().
+			Foreground(TextMuted)
+
+	BadgeStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(Secondary).
+			Padding(0, 1)
+
+	BadgeSuccessStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Background(ColorSuccess).
+				Padding(0, 1)
+
+	BadgeErrorStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(ColorError).
+			Padding(0, 1)
+
+	HelpStyle = lipgloss.NewStyle().
+			Foreground(TextMuted)
+
+	SpinnerStyle = lipgloss.NewStyle().
+			Foreground(Primary)
+
+	SuccessStyle = lipgloss.NewStyle().
+			Foreground(ColorSuccess).
 			Bold(true)
 
-	selectedItemStyle = lipgloss.NewStyle().
-				Foreground(colorCyan)
-
-	normalItemStyle = lipgloss.NewStyle().
-			Foreground(colorWhite)
-
-	dimItemStyle = lipgloss.NewStyle().
-			Foreground(colorDim)
-
-	successStyle = lipgloss.NewStyle().
-			Foreground(colorGreen).
-			Bold(true)
-
-	errorStyle = lipgloss.NewStyle().
-			Foreground(colorRed).
-			Bold(true)
-
-	warningStyle = lipgloss.NewStyle().
-			Foreground(colorYellow)
-
-	infoStyle = lipgloss.NewStyle().
-			Foreground(colorBlue)
-
-	labelStyle = lipgloss.NewStyle().
-			Foreground(colorDim)
-
-	valueStyle = lipgloss.NewStyle().
-			Foreground(colorWhite)
-
-	sectionStyle = lipgloss.NewStyle().
-			Foreground(colorCyan).
+	ErrorStyle = lipgloss.NewStyle().
+			Foreground(ColorError).
 			Bold(true)
 )

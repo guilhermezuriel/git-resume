@@ -5,31 +5,30 @@ import (
 )
 
 var (
-	colorCyan  = lipgloss.Color("6")
-	colorDim   = lipgloss.Color("240")
-	colorWhite = lipgloss.Color("15")
+	primary    = lipgloss.AdaptiveColor{Light: "#7C3AED", Dark: "#A78BFA"}
+	textMuted  = lipgloss.AdaptiveColor{Light: "#94A3B8", Dark: "#6C7086"}
+	textSecond = lipgloss.AdaptiveColor{Light: "#64748B", Dark: "#A6ADC8"}
 
-	headerBorderStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(colorCyan).
-				Padding(0, 2)
-
-	headerTitleStyle = lipgloss.NewStyle().
-				Foreground(colorCyan).
-				Bold(true)
+	headerLogoStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(primary).
+			Padding(0, 2)
 
 	headerSepStyle = lipgloss.NewStyle().
-			Foreground(colorDim)
+			Foreground(textMuted)
 
 	headerSubStyle = lipgloss.NewStyle().
-			Foreground(colorWhite)
+			Foreground(textSecond)
 )
 
-// Header renders a rounded-bordered header bar with title and optional subtitle.
+// Header renders a compact header bar with logo badge and optional subtitle.
 func Header(title, subtitle string) string {
-	content := headerTitleStyle.Render(title)
-	if subtitle != "" {
-		content += headerSepStyle.Render("  ·  ") + headerSubStyle.Render(subtitle)
+	logo := headerLogoStyle.Render(" " + title + " ")
+	if subtitle == "" {
+		return logo
 	}
-	return headerBorderStyle.Render(content)
+	sep := headerSepStyle.Render("  ·  ")
+	sub := headerSubStyle.Render(subtitle)
+	return lipgloss.JoinHorizontal(lipgloss.Center, logo, sep, sub)
 }

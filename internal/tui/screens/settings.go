@@ -11,15 +11,23 @@ import (
 )
 
 var (
-	settingsCursorStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
-	settingsSelectedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
-	settingsNormalStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-	settingsDimStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	settingsSuccessStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true)
-	settingsWarningStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	settingsLabelStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	settingsValueStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-	settingsAccentStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+	settingsPrimary  = lipgloss.AdaptiveColor{Light: "#7C3AED", Dark: "#A78BFA"}
+	settingsSucc     = lipgloss.AdaptiveColor{Light: "#10B981", Dark: "#34D399"}
+	settingsWarn     = lipgloss.AdaptiveColor{Light: "#F59E0B", Dark: "#FBBF24"}
+	settingsTextMain = lipgloss.AdaptiveColor{Light: "#1E293B", Dark: "#CDD6F4"}
+	settingsTextMut  = lipgloss.AdaptiveColor{Light: "#94A3B8", Dark: "#6C7086"}
+	settingsTextSec  = lipgloss.AdaptiveColor{Light: "#64748B", Dark: "#A6ADC8"}
+	settingsSecColor = lipgloss.AdaptiveColor{Light: "#0EA5E9", Dark: "#38BDF8"}
+
+	settingsCursorStyle   = lipgloss.NewStyle().Foreground(settingsPrimary).Bold(true)
+	settingsSelectedStyle = lipgloss.NewStyle().Foreground(settingsPrimary).Bold(true)
+	settingsNormalStyle   = lipgloss.NewStyle().Foreground(settingsTextMain)
+	settingsDimStyle      = lipgloss.NewStyle().Foreground(settingsTextMut)
+	settingsSuccessStyle  = lipgloss.NewStyle().Foreground(settingsSucc).Bold(true)
+	settingsWarningStyle  = lipgloss.NewStyle().Foreground(settingsWarn)
+	settingsLabelStyle    = lipgloss.NewStyle().Foreground(settingsTextSec)
+	settingsValueStyle    = lipgloss.NewStyle().Foreground(settingsTextMain)
+	settingsAccentStyle   = lipgloss.NewStyle().Foreground(settingsSecColor)
 )
 
 type settingsView int
@@ -125,7 +133,7 @@ func (s Settings) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (s Settings) View() string {
 	var sb strings.Builder
 	sb.WriteString("\n")
-	sb.WriteString(components.Header("git-resume v3.0.0", "Settings"))
+	sb.WriteString(components.Header("git-resume", "Settings"))
 	sb.WriteString("\n\n")
 
 	switch s.view {
