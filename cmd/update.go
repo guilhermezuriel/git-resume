@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -112,9 +114,16 @@ func downloadBinary(url, dest string) error {
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
 
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
-		tmp.Close()
-		return err
+	if strings.HasSuffix(url, ".tar.gz") {
+		if err := extractBinaryFromTarGz(resp.Body, tmp); err != nil {
+			tmp.Close()
+			return err
+		}
+	} else {
+		if _, err := io.Copy(tmp, resp.Body); err != nil {
+			tmp.Close()
+			return err
+		}
 	}
 	tmp.Close()
 
@@ -123,6 +132,39 @@ func downloadBinary(url, dest string) error {
 	}
 
 	return replaceExecutable(tmpPath, dest)
+}
+
+func extractBinaryFromTarGz(r io.Reader, dest *os.File) error {
+	gz, err := gzip.NewReader(r)
+	if err != nil {
+		return fmt.Errorf("failed to open gzip: %w", err)
+	}
+	defer gz.Close()
+
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read tar: %w", err)
+		}
+
+		name := hdr.Name
+		// Find the binary: a regular file named "git-resume" (no extension, not a directory)
+		base := name
+		if idx := strings.LastIndex(name, "/"); idx >= 0 {
+			base = name[idx+1:]
+		}
+		if hdr.Typeflag == tar.TypeReg && base == "git-resume" {
+			if _, err := io.Copy(dest, tr); err != nil {
+				return fmt.Errorf("failed to extract binary: %w", err)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("binary 'git-resume' not found inside archive")
 }
 
 // replaceExecutable swaps the running binary with the new one.
@@ -154,9 +196,6 @@ func replaceExecutable(src, dest string) error {
 func binaryName() string {
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
-	name := fmt.Sprintf("git-resume_%s_%s", goos, goarch)
-	if goos == "windows" {
-		name += ".exe"
-	}
+	name := fmt.Sprintf("git-resume_%s_%s.tar.gz", goos, goarch)
 	return name
 }

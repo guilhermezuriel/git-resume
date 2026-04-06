@@ -146,7 +146,7 @@ download_file() {
 }
 
 install_git_resume() {
-    local os arch version asset_name download_url temp_file
+    local os arch version asset_name download_url temp_archive temp_dir
 
     os=$(detect_os)
     arch=$(detect_arch)
@@ -162,28 +162,48 @@ install_git_resume() {
 
     print_info "Latest version: v${version}"
 
-    asset_name="${BINARY_NAME}_${os}_${arch}"
+    asset_name="${BINARY_NAME}_${os}_${arch}.tar.gz"
     download_url="https://github.com/${REPO}/releases/download/v${version}/${asset_name}"
 
     print_step "Downloading ${asset_name}..."
-    temp_file=$(mktemp)
+    temp_archive=$(mktemp)
+    temp_dir=$(mktemp -d)
 
-    if ! download_file "$download_url" "$temp_file"; then
-        rm -f "$temp_file"
+    if ! download_file "$download_url" "$temp_archive"; then
+        rm -f "$temp_archive"
+        rm -rf "$temp_dir"
         print_error "Download failed: ${download_url}"
         print_info "Check releases at: https://github.com/${REPO}/releases"
         exit 1
     fi
 
-    chmod +x "$temp_file"
+    print_step "Extracting archive..."
+    if ! tar -xzf "$temp_archive" -C "$temp_dir"; then
+        rm -f "$temp_archive"
+        rm -rf "$temp_dir"
+        print_error "Failed to extract archive"
+        exit 1
+    fi
+    rm -f "$temp_archive"
+
+    local extracted_binary="${temp_dir}/${BINARY_NAME}"
+    if [[ ! -f "$extracted_binary" ]]; then
+        rm -rf "$temp_dir"
+        print_error "Binary '${BINARY_NAME}' not found inside archive"
+        exit 1
+    fi
+
+    chmod +x "$extracted_binary"
 
     print_step "Installing to ${INSTALL_DIR}/${BINARY_NAME}..."
 
     if [[ -w "$INSTALL_DIR" ]]; then
-        mv "$temp_file" "${INSTALL_DIR}/${BINARY_NAME}"
+        mv "$extracted_binary" "${INSTALL_DIR}/${BINARY_NAME}"
     else
-        sudo mv "$temp_file" "${INSTALL_DIR}/${BINARY_NAME}"
+        sudo mv "$extracted_binary" "${INSTALL_DIR}/${BINARY_NAME}"
     fi
+
+    rm -rf "$temp_dir"
 
     print_success "git-resume v${version} installed to ${INSTALL_DIR}/${BINARY_NAME}"
 }
