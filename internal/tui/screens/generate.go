@@ -74,9 +74,11 @@ type GenerateFlow struct {
 	cursors [6]int
 
 	// Custom input fields
-	customDateInput   textinput.Model
-	customAuthorInput textinput.Model
-	customLangInput   textinput.Model
+	customDateInput      textinput.Model
+	customRangeFromInput textinput.Model
+	customRangeToInput   textinput.Model
+	customAuthorInput    textinput.Model
+	customLangInput      textinput.Model
 
 	// Collected config
 	cfg config.RunConfig
@@ -91,6 +93,8 @@ type GenerateFlow struct {
 
 	// Custom input mode flags
 	enteringCustomDate   bool
+	enteringCustomRange  bool
+	rangeStage           int // 0 = from, 1 = to
 	enteringCustomAuthor bool
 	enteringCustomLang   bool
 }
@@ -107,6 +111,14 @@ func NewGenerateFlow(repoInfo *gitpkg.RepoInfo) GenerateFlow {
 	ti := textinput.New()
 	ti.Placeholder = "YYYY-MM-DD"
 	ti.CharLimit = 10
+
+	tiFrom := textinput.New()
+	tiFrom.Placeholder = "YYYY-MM-DD"
+	tiFrom.CharLimit = 10
+
+	tiTo := textinput.New()
+	tiTo.Placeholder = "YYYY-MM-DD"
+	tiTo.CharLimit = 10
 
 	tai := textinput.New()
 	tai.Placeholder = "Author name or email"
@@ -140,17 +152,19 @@ func NewGenerateFlow(repoInfo *gitpkg.RepoInfo) GenerateFlow {
 	return GenerateFlow{
 		repoInfo:          repoInfo,
 		step:              stepDate,
-		dateOptions:       []string{fmt.Sprintf("Today (%s)", today), fmt.Sprintf("Yesterday (%s)", yesterday), "Custom date"},
-		authorOptions:     []string{"All commits", authorLabel, "Specific author"},
-		branchOptions:     []string{"Current branch only", "All branches"},
-		modeOptions:       []string{"Simple (fast)", "AI-enriched"},
-		modelOptions:      modelLabels,
-		modelIDs:          modelIDs,
-		langOptions:       []string{"pt (Portuguese)", "en (English)", "es (Spanish)", "fr (French)", "de (German)", "Other"},
-		customDateInput:   ti,
-		customAuthorInput: tai,
-		customLangInput:   tli,
-		spinner:           sp,
+		dateOptions:          []string{fmt.Sprintf("Today (%s)", today), fmt.Sprintf("Yesterday (%s)", yesterday), "Custom date", "Custom date range"},
+		authorOptions:        []string{"All commits", authorLabel, "Specific author"},
+		branchOptions:        []string{"Current branch only", "All branches"},
+		modeOptions:          []string{"Simple (fast)", "AI-enriched"},
+		modelOptions:         modelLabels,
+		modelIDs:             modelIDs,
+		langOptions:          []string{"pt (Portuguese)", "en (English)", "es (Spanish)", "fr (French)", "de (German)", "Other"},
+		customDateInput:      ti,
+		customRangeFromInput: tiFrom,
+		customRangeToInput:   tiTo,
+		customAuthorInput:    tai,
+		customLangInput:      tli,
+		spinner:              sp,
 	}
 }
 
@@ -177,6 +191,9 @@ func (g GenerateFlow) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if g.enteringCustomDate {
 			return g.handleCustomDateInput(msg)
+		}
+		if g.enteringCustomRange {
+			return g.handleCustomRangeInput(msg)
 		}
 		if g.enteringCustomAuthor {
 			return g.handleCustomAuthorInput(msg)
@@ -231,6 +248,15 @@ func (g GenerateFlow) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		g.customDateInput, cmd = g.customDateInput.Update(msg)
 		return g, cmd
 	}
+	if g.enteringCustomRange {
+		var cmd tea.Cmd
+		if g.rangeStage == 0 {
+			g.customRangeFromInput, cmd = g.customRangeFromInput.Update(msg)
+		} else {
+			g.customRangeToInput, cmd = g.customRangeToInput.Update(msg)
+		}
+		return g, cmd
+	}
 	if g.enteringCustomAuthor {
 		var cmd tea.Cmd
 		g.customAuthorInput, cmd = g.customAuthorInput.Update(msg)
@@ -264,6 +290,12 @@ func (g GenerateFlow) handleEnter() (tea.Model, tea.Cmd) {
 			g.enteringCustomDate = true
 			g.customDateInput.SetValue("")
 			return g, g.customDateInput.Focus()
+		case 3:
+			g.enteringCustomRange = true
+			g.rangeStage = 0
+			g.customRangeFromInput.SetValue("")
+			g.customRangeToInput.SetValue("")
+			return g, g.customRangeFromInput.Focus()
 		}
 
 	case stepAuthor:
@@ -352,6 +384,52 @@ func (g GenerateFlow) handleCustomDateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	return g, cmd
 }
 
+func (g GenerateFlow) handleCustomRangeInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		if g.rangeStage == 0 {
+			from := strings.TrimSpace(g.customRangeFromInput.Value())
+			if _, err := time.Parse("2006-01-02", from); err != nil {
+				return g, nil
+			}
+			g.cfg.DateFrom = from
+			g.customRangeFromInput.Blur()
+			g.rangeStage = 1
+			return g, g.customRangeToInput.Focus()
+		}
+		to := strings.TrimSpace(g.customRangeToInput.Value())
+		if to == "" {
+			to = time.Now().Format("2006-01-02")
+		}
+		toTime, err := time.Parse("2006-01-02", to)
+		if err != nil {
+			return g, nil
+		}
+		fromTime, _ := time.Parse("2006-01-02", g.cfg.DateFrom)
+		if toTime.Before(fromTime) {
+			return g, nil
+		}
+		g.cfg.DateTo = to
+		g.enteringCustomRange = false
+		g.customRangeToInput.Blur()
+		g.step = stepAuthor
+		return g, nil
+	case "esc":
+		g.enteringCustomRange = false
+		g.rangeStage = 0
+		g.customRangeFromInput.Blur()
+		g.customRangeToInput.Blur()
+		return g, nil
+	}
+	var cmd tea.Cmd
+	if g.rangeStage == 0 {
+		g.customRangeFromInput, cmd = g.customRangeFromInput.Update(msg)
+	} else {
+		g.customRangeToInput, cmd = g.customRangeToInput.Update(msg)
+	}
+	return g, cmd
+}
+
 func (g GenerateFlow) handleCustomAuthorInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
@@ -427,6 +505,25 @@ func (g GenerateFlow) View() string {
 			sb.WriteString(g.customDateInput.View())
 			sb.WriteString("\n\n")
 			sb.WriteString(genDimStyle.Render("  enter confirm  ·  esc cancel"))
+		} else if g.enteringCustomRange {
+			fromLabel := "  From: "
+			toLabel := "  To:   "
+			if g.rangeStage == 0 {
+				sb.WriteString(genDimStyle.Render(fromLabel))
+				sb.WriteString(g.customRangeFromInput.View())
+				sb.WriteString("\n")
+				sb.WriteString(genDimStyle.Render(toLabel))
+				sb.WriteString(genDimStyle.Render(g.customRangeToInput.Placeholder))
+				sb.WriteString("\n\n")
+			} else {
+				sb.WriteString(genDimStyle.Render(fromLabel))
+				sb.WriteString(genValueStyle.Render(g.cfg.DateFrom))
+				sb.WriteString("\n")
+				sb.WriteString(genDimStyle.Render(toLabel))
+				sb.WriteString(g.customRangeToInput.View())
+				sb.WriteString("\n\n")
+			}
+			sb.WriteString(genDimStyle.Render("  enter next  ·  esc cancel  ·  format YYYY-MM-DD"))
 		} else {
 			sb.WriteString(renderOptions(g.dateOptions, g.cursors[cursorIdx(stepDate)]))
 			sb.WriteString(genDimStyle.Render("\n  ↑↓ move  ·  enter select  ·  esc back"))
@@ -501,7 +598,11 @@ func (g GenerateFlow) View() string {
 		}
 
 		sb.WriteString(genDimStyle.Render("  " + strings.Repeat("─", 32)) + "\n")
-		sb.WriteString(fmt.Sprintf("  %-10s %s\n", genLabelStyle.Render("Date"), genValueStyle.Render(g.cfg.DateFrom)))
+		dateLabel := g.cfg.DateFrom
+		if g.cfg.DateFrom != g.cfg.DateTo {
+			dateLabel = g.cfg.DateFrom + " → " + g.cfg.DateTo
+		}
+		sb.WriteString(fmt.Sprintf("  %-10s %s\n", genLabelStyle.Render("Date"), genValueStyle.Render(dateLabel)))
 		sb.WriteString(fmt.Sprintf("  %-10s %s\n", genLabelStyle.Render("Author"), genValueStyle.Render(authorLabel)))
 		sb.WriteString(fmt.Sprintf("  %-10s %s\n", genLabelStyle.Render("Branches"), genValueStyle.Render(branchScopeLabel)))
 		sb.WriteString(fmt.Sprintf("  %-10s %s\n", genLabelStyle.Render("Mode"), genValueStyle.Render(modeLabel)))
